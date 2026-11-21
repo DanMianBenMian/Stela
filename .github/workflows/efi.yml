@@ -118,3 +118,59 @@ jobs:
           path: dist/stela.efi
           if-no-files-found: error
           retention-days: 30
+
+  # The CLI embeds the stela.efi built above, exactly as release.yml's `cli` job
+  # does, so the two always match. Only the Windows target is built: this fork
+  # exists to set up a Windows PC.
+  cli:
+    needs: [efi]
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Put LLVM on PATH
+        run: |
+          # The C build passes --no-default-config, which Clang 16 and newer
+          # take.
+          echo 'C:\Program Files\LLVM\bin' >> "$GITHUB_PATH"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-cli-windows-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: cargo-cli-windows-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-msvc
+          rustc --version
+          # stela-tls compiles Mbed TLS with clang on every host, and archives
+          # it with llvm-lib for Windows.
+          for tool in clang llvm-lib; do
+            command -v "$tool" >/dev/null || { echo "::error::$tool is not on PATH"; exit 1; }
+          done
+          clang --version | head -1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: stela-efi
+          path: efi
+
+      - name: Build stela
+        run: |
+          export STELA_EFI="$PWD/efi/stela.efi"
+          cargo build --release --locked -p stela-cli --target x86_64-pc-windows-msvc
+          mkdir -p stela-windows-x86_64
+          cp target/x86_64-pc-windows-msvc/release/stela.exe stela-windows-x86_64/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stela-windows-x86_64
+          path: stela-windows-x86_64/
+          if-no-files-found: error

@@ -1606,8 +1606,14 @@ fn locate_esp(host: &dyn Host, usb: &Path) -> Result<PathBuf> {
         .disk
         .and_then(|id| disks.into_iter().find(|d| d.identifier == id))
     {
+        // Local fork change: this PC has no spare stick, so setup writes two
+        // partitions of an internal disk instead. That is allowed only when
+        // STELA_ALLOW_INTERNAL_DISK=1 says so and the disk is not the one this
+        // computer runs from, so a volume named without care still cannot
+        // touch the disk that holds Windows.
+        let allow = std::env::var("STELA_ALLOW_INTERNAL_DISK").is_ok_and(|v| v == "1");
         ensure!(
-            disk.erasable(),
+            disk.erasable() || (allow && !disk.system),
             "{} is on {} ({}), an internal disk{}. Stela changes only a removable stick: \
              plug one in and name it.",
             esp.display(),
