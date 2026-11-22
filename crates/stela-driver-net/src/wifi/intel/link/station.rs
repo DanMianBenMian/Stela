@@ -2163,7 +2163,15 @@ impl<Q: BootIo, B: BiosIo> Link for Wifi<Q, B> {
     fn mac(&self) -> Mac {
         self.address
     }
+    /// A station reports carrier only while its port is open, and its
+    /// handshake advances only while something serves it. The host stack asks
+    /// for carrier before it ever receives a frame, so serve the station
+    /// here: nothing else in the boot calls [`Radio::service`], and without
+    /// this the radio is never asked to associate at all -- no frame leaves,
+    /// the NVM is never read (so `mac` stays zero), and the address step
+    /// reports `frames sent=0`.
     fn carrier(&mut self) -> bool {
+        let _ = Radio::service(self);
         self.client.port_open
     }
     /// A station signals once its port is open. Until then the handshake's
@@ -2192,6 +2200,9 @@ impl<Q: BootIo, B: BiosIo> Link for Wifi<Q, B> {
             })
     }
     fn receive(&mut self) -> Result<Option<Vec<u8>>, LinkError> {
+        // Frames appear only from a served station, and a stack that polls for
+        // them is the only clock this link has: serve it before looking.
+        let _ = Radio::service(self);
         Ok(self.client.received.pop_front())
     }
 }
