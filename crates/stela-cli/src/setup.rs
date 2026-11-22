@@ -550,6 +550,8 @@ pub(crate) struct Request {
     wifi_passphrase_file: Option<PathBuf>,
     wifi_country: Option<String>,
     no_wifi: bool,
+    /// `--wifi-prompt`: choose the network at start instead of naming it.
+    wifi_prompt: bool,
     usb4_approve: Vec<String>,
     no_usb4_approve: bool,
     /// `--wifi`'s passphrase, once read or typed.
@@ -1465,6 +1467,11 @@ impl Request {
         if let Some(model) = &self.model {
             check_model(environment.models, model)?;
         }
+        ensure!(
+            !(self.wifi.is_some() && self.wifi_prompt),
+            "--wifi names the network to join; --wifi-prompt asks for one at start: pass one \
+             of the two"
+        );
         // A first setup that was interrupted is finished by `repair`, not
         // added to.
         let configured = locate_esp(environment.host, &self.usb).is_ok_and(|esp| {
