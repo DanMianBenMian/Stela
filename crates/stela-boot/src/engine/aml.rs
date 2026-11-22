@@ -674,11 +674,7 @@ unsafe extern "C" fn thread_id(context: *mut c_void) -> u64 {
     // events and deferred firmware work are all off (`UNSUPPORTED ACPI
     // hardware mode`), so a borrowed ownership cannot overlap a real
     // evaluation on another stack.
-    provider
-        .executor
-        .current_id()
-        .map(|id| id.get())
-        .unwrap_or(FOREIGN_CONTEXT)
+    provider.executor.current_id().unwrap_or(FOREIGN_CONTEXT)
 }
 
 unsafe extern "C" fn execute(
