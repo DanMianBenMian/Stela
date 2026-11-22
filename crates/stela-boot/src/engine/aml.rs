@@ -657,14 +657,28 @@ unsafe extern "C" fn remove_interrupt(context: *mut c_void, _: u32, _: Interrupt
     }
 }
 
+/// The identity ACPICA sees for a caller that is not one of its owned
+/// continuations: an Intel radio evaluating its own `_DSM`/`WRDD` from the
+/// network step's stack, which the executor gives no id. Real ids come from
+/// the executor's tasks and are never zero.
+const FOREIGN_CONTEXT: u64 = 0;
+
 /// ACPICA mutex ownership uses the continuation identity.
 unsafe extern "C" fn thread_id(context: *mut c_void) -> u64 {
     // SAFETY: this Session keeps its provider and real affine work owner.
     let provider = unsafe { provider(context) };
+    // Refusing a caller outside the owned continuation used to stop the whole
+    // boot ("ACPICA called outside its owned native continuation"), which is
+    // what an attached radio's first `WRDD` read after ExitBootServices did.
+    // Such a caller shares one fixed identity instead: ACPI interrupts,
+    // events and deferred firmware work are all off (`UNSUPPORTED ACPI
+    // hardware mode`), so a borrowed ownership cannot overlap a real
+    // evaluation on another stack.
     provider
         .executor
         .current_id()
-        .unwrap_or_else(|_| output::fatal("ACPICA called outside its owned native continuation"))
+        .map(|id| id.get())
+        .unwrap_or(FOREIGN_CONTEXT)
 }
 
 unsafe extern "C" fn execute(
