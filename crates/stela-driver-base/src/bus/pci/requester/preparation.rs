@@ -216,6 +216,17 @@ impl PreparingRequester {
             if address != config.address() {
                 return Err(ClaimError::IdentityChanged);
             }
+            // The firmware can leave an endpoint mastering the bus, as a
+            // Wi-Fi radio initialised for network boot is: `seal_bus_master`
+            // refuses a set bit, so the claim would fail before any driver
+            // ran. Stop it here, as Linux's `pci_disable_device` clears the
+            // bit, and the seal then matches the stopped state.
+            let command = config.read16(regs::COMMAND).map_err(ClaimError::Config)?;
+            if command & regs::COMMAND_MASTER != 0 {
+                config
+                    .write16(regs::COMMAND, command & !regs::COMMAND_MASTER)
+                    .map_err(ClaimError::Config)?;
+            }
             config.seal_bus_master().map_err(ClaimError::Config)?;
             config.retain_epoch().map_err(ClaimError::Mapping)
         })();
