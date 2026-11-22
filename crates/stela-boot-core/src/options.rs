@@ -46,6 +46,10 @@ pub const SCANOUT_MIRROR: &str = "--scanout-mirror";
 pub const WIFI: &str = "--wifi";
 pub const WIFI_KEY: &str = "--wifi-key";
 pub const WIFI_COUNTRY: &str = "--wifi-country";
+/// Ask for the network at start instead of naming it here: `stela.efi`
+/// lists the networks it saved on the ESP and joins the one chosen, so a
+/// laptop carried between networks needs no other computer to change it.
+pub const WIFI_PROMPT: &str = "--wifi-prompt";
 pub const USB4_APPROVE: &str = "--usb4-approve";
 /// The ESP file `--wifi` reads its key from without `--wifi-key`.
 pub const DEFAULT_WIFI_KEY: &str = "\\EFI\\stela\\wifi.key";
@@ -330,6 +334,10 @@ pub struct System {
     /// The ISO 3166-1 alpha-2 regulatory country, uppercase
     /// (`--wifi-country XX`).
     pub wifi_country: Option<String>,
+    /// Choose the network at start (`--wifi-prompt`): `stela.efi` lists the
+    /// ones the ESP holds and joins the chosen one, before the mount's
+    /// network comes up.
+    pub wifi_prompt: bool,
     /// The mount network's IPv4 address, set by hand instead of by DHCP
     /// (`--ipv4 ADDRESS/PREFIX`).
     pub ipv4: Option<StaticIpv4>,
@@ -415,6 +423,7 @@ impl Default for System {
             ssid: None,
             wifi_key: None,
             wifi_country: None,
+            wifi_prompt: false,
             ipv4: None,
             ipv4_gateway: None,
             dns: Vec::new(),
@@ -837,6 +846,7 @@ impl fmt::Display for System {
                 .filter(|&path| path != DEFAULT_WIFI_KEY),
         )?;
         line.value(WIFI_COUNTRY, self.wifi_country.as_deref())?;
+        line.flag(WIFI_PROMPT, self.wifi_prompt)?;
         line.value(IPV4, self.ipv4)?;
         line.value(IPV4_GATEWAY, self.ipv4_gateway)?;
         line.value(DNS, (!self.dns.is_empty()).then(|| Servers(&self.dns)))?;
