@@ -43,6 +43,10 @@ pub const RELAY_BUFFER: usize = 1 << 20;
 const NO_ADAPTER: &str = "No supported network adapter. Connect wired Ethernet: most Intel and Realtek adapters, Aquantia adapters, Broadcom's BCM5720, BCM5761 and BCM5762, or a Realtek or ASIX USB adapter.";
 /// What the screen says when DHCP gives the first adapter no lease.
 const NO_LEASE: &str = "No automatic network address. Connect Ethernet to a network with DHCPv4 or IPv6 router advertisements, or set an address with `stela settings --ipv4 ADDRESS/PREFIX` on another computer. Stateful DHCPv6 is unsupported.";
+/// Passes over the adapters before the step refuses: each waits for carrier
+/// and then the runtime's own 60 s lease deadline, so this bounds the wait
+/// at roughly ten minutes instead of one adapter's first silent second.
+const AUTOMATIC_PASSES: u32 = 6;
 
 /// The host's network adapters and the loader root they are reached in.
 /// Adapters left in it are dropped in that root.
@@ -311,106 +315,124 @@ impl HostNetwork {
             }
         }
         let mut failures = Vec::new();
-        output::arguments(format_args!("NETWORK open: ordering adapters by carrier\n"));
-        links.carrier_first();
-        output::arguments(format_args!("NETWORK open: carriers read\n"));
         // Each adapter is owned by a `RootLink` or still by `links` on every
         // path out, so it is dropped in the loader's root.
-        let mut next = 0;
-        while next < links.devices.len() {
-            let link = RootLink::new(links.devices.remove(next), links.root);
-            let driver = link.device.driver();
-            let wireless = link.device.wireless();
-            let location = String::from(link.device.location());
-            let frames = Rc::clone(&link.frames);
-            output::arguments(format_args!(
-                "NETWORK candidate driver={driver} adapter={location} mac={}\n",
-                stela_contracts::masked::Mac(&link.mac().0)
+        //
+        // The install has no use for a boot that never reaches Apple's
+        // signing server, so an adapter is asked again instead of failing the
+        // whole step on its first answer: a radio finishes associating late,
+        // and a cable plugged in during the wait is picked up by the next
+        // pass. Each pass reads carrier first, so a link that came up
+        // meanwhile moves to the front of it.
+        for pass in 1..=AUTOMATIC_PASSES {
+            crate::status::progress(&format!(
+                "no address yet: pass {pass} of {AUTOMATIC_PASSES}"
             ));
-            crate::status::progress(&format!("adapter {location}"));
-            let mut seed = [0u8; 8];
-            crate::random::fill(&mut seed)
-                .map_err(|_| refuse!("secure host entropy is unavailable for the network stack"))?;
-            let mut stack = Stack::new(link, Ticking(clock), u64::from_le_bytes(seed))
-                .map_err(|error| refuse!("host network stack: {error}", %error))?;
-            if let Some(ipv4) = options.ipv4 {
-                stack
-                    .set_ipv4(ipv4.address, ipv4.prefix, options.ipv4_gateway)
-                    .map_err(|error| refuse!("host network --ipv4 {ipv4}: {error}", %error))?;
-            }
-            if !options.dns.is_empty() {
-                stack
-                    .set_dns(&options.dns)
-                    .map_err(|error| refuse!("host network --dns: {error}", %error))?;
-            }
-            let waiting = |seconds: u64| {
-                crate::status::progress(&format!(
-                    "adapter {location}: waiting for the link, {seconds} s"
+            output::arguments(format_args!(
+                "NETWORK open: pass {pass} of {AUTOMATIC_PASSES}, ordering adapters by carrier\n"
+            ));
+            links.carrier_first();
+            let mut next = 0;
+            while next < links.devices.len() {
+                let link = RootLink::new(links.devices.remove(next), links.root);
+                let driver = link.device.driver();
+                let wireless = link.device.wireless();
+                let location = String::from(link.device.location());
+                let frames = Rc::clone(&link.frames);
+                output::arguments(format_args!(
+                    "NETWORK candidate driver={driver} adapter={location} mac={}\n",
+                    stela_contracts::masked::Mac(&link.mac().0)
                 ));
-            };
-            output::arguments(format_args!(
-                "NETWORK adapter {location}: asking for an address\n"
-            ));
-            let result = stack.automatic_waiting(waiting);
-            // The DHCP lease, or what the exchange did without one.
-            for note in stack.take_notes() {
-                output::arguments(format_args!("NETWORK adapter {location} {note}\n"));
-            }
-            match result {
-                Ok(config) => {
-                    output::arguments(format_args!("NETWORK driver={driver}\n"));
-                    output::arguments(format_args!(
-                        "NETWORK adapter={location} addresses={:?} dns={:?}\n",
-                        config.addresses, config.dns
-                    ));
-                    let addresses: Vec<String> = config
-                        .addresses
-                        .iter()
-                        .map(alloc::string::ToString::to_string)
-                        .collect();
-                    let description = format!("{} on adapter {location}", addresses.join(", "));
-                    return Ok(Self {
-                        stack,
-                        description,
-                        security,
-                    });
+                crate::status::progress(&format!("adapter {location}"));
+                let mut seed = [0u8; 8];
+                crate::random::fill(&mut seed).map_err(|_| {
+                    refuse!("secure host entropy is unavailable for the network stack")
+                })?;
+                let mut stack = Stack::new(link, Ticking(clock), u64::from_le_bytes(seed))
+                    .map_err(|error| refuse!("host network stack: {error}", %error))?;
+                if let Some(ipv4) = options.ipv4 {
+                    stack
+                        .set_ipv4(ipv4.address, ipv4.prefix, options.ipv4_gateway)
+                        .map_err(|error| refuse!("host network --ipv4 {ipv4}: {error}", %error))?;
                 }
-                Err(error) => {
-                    output::arguments(format_args!(
-                        "NETWORK adapter {location} failed: {error}; frames sent={} received={}\n",
-                        frames.sent.get(),
-                        frames.received.get()
+                if !options.dns.is_empty() {
+                    stack
+                        .set_dns(&options.dns)
+                        .map_err(|error| refuse!("host network --dns: {error}", %error))?;
+                }
+                let waiting = |seconds: u64| {
+                    crate::status::progress(&format!(
+                        "adapter {location}: waiting for the link, {seconds} s"
                     ));
-                    if let Some(dhcp) = stack.dhcp_summary() {
+                };
+                output::arguments(format_args!(
+                    "NETWORK adapter {location}: asking for an address\n"
+                ));
+                let result = stack.automatic_waiting(waiting);
+                // The DHCP lease, or what the exchange did without one.
+                for note in stack.take_notes() {
+                    output::arguments(format_args!("NETWORK adapter {location} {note}\n"));
+                }
+                match result {
+                    Ok(config) => {
+                        output::arguments(format_args!("NETWORK driver={driver}\n"));
                         output::arguments(format_args!(
-                            "NETWORK adapter {location} dhcp: {dhcp}\n"
+                            "NETWORK adapter={location} addresses={:?} dns={:?}\n",
+                            config.addresses, config.dns
                         ));
+                        let addresses: Vec<String> = config
+                            .addresses
+                            .iter()
+                            .map(alloc::string::ToString::to_string)
+                            .collect();
+                        let description = format!("{} on adapter {location}", addresses.join(", "));
+                        return Ok(Self {
+                            stack,
+                            description,
+                            security,
+                        });
                     }
-                    // What the adapter's own registers and rings say then,
-                    // where its driver keeps them: a dead receive or
-                    // transmit path is told apart from a silent network.
-                    if let Some(state) = stack.link_mut().diagnostic() {
+                    Err(error) => {
                         output::arguments(format_args!(
-                            "NETWORK adapter {location} state: {state}\n"
+                            "NETWORK adapter {location} failed: {error}; frames sent={} received={}\n",
+                            frames.sent.get(),
+                            frames.received.get()
                         ));
-                    }
-                    failures.push(match error {
-                        stela_runtime::net::NetError::NoCarrier => {
-                            stela_drivers::probe::no_link(&location, wireless)
+                        if let Some(dhcp) = stack.dhcp_summary() {
+                            output::arguments(format_args!(
+                                "NETWORK adapter {location} dhcp: {dhcp}\n"
+                            ));
                         }
-                        error => format!("{location}: no address ({error})."),
-                    });
-                    // It stays started, in its place, for the guest network:
-                    // its link may come up later. Unused, it is stopped with
-                    // the rest (`Links`).
-                    links.devices.insert(next, stack.into_link().into_device());
-                    next += 1;
-                    output::arguments(format_args!(
-                        "NETWORK adapter {location} kept started, free for the guest network\n"
-                    ));
+                        // What the adapter's own registers and rings say then,
+                        // where its driver keeps them: a dead receive or
+                        // transmit path is told apart from a silent network.
+                        if let Some(state) = stack.link_mut().diagnostic() {
+                            output::arguments(format_args!(
+                                "NETWORK adapter {location} state: {state}\n"
+                            ));
+                        }
+                        failures.push(match error {
+                            stela_runtime::net::NetError::NoCarrier => {
+                                stela_drivers::probe::no_link(&location, wireless)
+                            }
+                            error => format!("{location}: no address ({error})."),
+                        });
+                        // It stays started, in its place, for the guest network:
+                        // its link may come up later. Unused, it is stopped with
+                        // the rest (`Links`).
+                        links.devices.insert(next, stack.into_link().into_device());
+                        next += 1;
+                        output::arguments(format_args!(
+                            "NETWORK adapter {location} kept started, free for the guest network\n"
+                        ));
+                    }
                 }
             }
+            output::arguments(format_args!(
+                "NETWORK open: pass {pass} of {AUTOMATIC_PASSES} found no address\n"
+            ));
         }
+
         if failures.is_empty() {
             Err(refuse!("{NO_ADAPTER}", NO_ADAPTER))
         } else {
