@@ -63,6 +63,7 @@ mod stop_record;
 mod storage;
 mod system;
 mod tables;
+mod pointer;
 mod ui;
 mod usb_legacy;
 mod wifi_prompt;
