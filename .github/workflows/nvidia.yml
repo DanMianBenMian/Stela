@@ -1,0 +1,38 @@
+name: nvidia-firmware
+
+# download.nvidia.com is unreliable from this PC (a 50 MB slice can stall
+# for 20 minutes). This runner fetches the pinned installer prefix and the
+# two bindata sources, then uploads them so the PC can put them in Stela's
+# cache and `stela create` can slice the GSP images without a download.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch the pinned NVIDIA installer prefix
+        run: |
+          mkdir -p nvidia
+          curl -fL --retry 5 --retry-all-errors \
+            -H "Range: bytes=0-52499999" \
+            -o nvidia/NVIDIA-Linux-x86_64-570.211.01.run \
+            https://download.nvidia.com/XFree86/Linux-x86_64/570.211.01/NVIDIA-Linux-x86_64-570.211.01.run
+          test "$(stat -c%s nvidia/NVIDIA-Linux-x86_64-570.211.01.run)" = 52500000
+          echo "3788bd873fb7298b3679e159c1a6824584be2552af45534caf290eec7f4674c0  nvidia/NVIDIA-Linux-x86_64-570.211.01.run" | sha256sum -c -
+      - name: Fetch the open-gpu bindata sources
+        run: |
+          for f in g_bindata_kgspGetBinArchiveGspRmBoot_GB202.c g_bindata_kgspGetBinArchiveGspRmFmcGfwProdSigned_GB202.c; do
+            curl -fL --retry 5 -o "nvidia/$f" \
+              "https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/498793d5e2a86c981b83c1bfb31f1f4a082d0f7b/src/nvidia/generated/$f"
+          done
+      - name: Pack
+        run: tar -C nvidia -cf nvidia-firmware.tar .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nvidia-firmware
+          path: nvidia-firmware.tar
+          retention-days: 7
