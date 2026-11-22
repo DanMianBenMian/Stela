@@ -9,10 +9,17 @@
 # plumbing.
 name: efi
 
+# Dispatch only. This fork builds the loader on demand; a push that changes
+# nothing about the boot program used to spend half an hour rebuilding it.
+# cli.yml compiles stela.exe against an artifact an `efi` run already uploaded.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
+
+# windows-2025 runs `run:` under PowerShell by default, and every step here is
+# bash (release.yml makes the same declaration).
+defaults:
+  run:
+    shell: bash
 
 permissions:
   contents: read

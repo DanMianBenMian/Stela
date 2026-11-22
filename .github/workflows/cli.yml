@@ -1,0 +1,77 @@
+# Builds the Windows stela.exe on demand, embedding the stela.efi an earlier
+# `efi` run uploaded. Separate from efi.yml so the CLI can be rebuilt without
+# rebuilding the boot program, which changes far less often.
+name: cli
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  cli:
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      # The `efi` run whose `stela-efi` artifact this binary embeds: `setup`
+      # installs that loader, so the two must come from the same source.
+      EFI_RUN: "44913402138"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Put LLVM on PATH
+        run: |
+          # The C build passes --no-default-config, which Clang 16 and newer
+          # take.
+          echo 'C:\Program Files\LLVM\bin' >> "$GITHUB_PATH"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup/toolchains
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-cli-windows-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: cargo-cli-windows-${{ hashFiles('rust-toolchain.toml') }}-
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-msvc
+          rustc --version
+          # stela-tls compiles Mbed TLS with clang on every host, and archives
+          # it with llvm-lib for Windows.
+          for tool in clang llvm-lib; do
+            command -v "$tool" >/dev/null || { echo "::error::$tool is not on PATH"; exit 1; }
+          done
+          clang --version | head -1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: stela-efi
+          path: efi
+          run-id: ${{ env.EFI_RUN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+
+      - name: Build stela
+        run: |
+          export STELA_EFI="$PWD/efi/stela.efi"
+          test -f "$STELA_EFI" || { echo "::error::stela.efi was not downloaded"; exit 1; }
+          ls -l "$STELA_EFI"
+          cargo build --release --locked -p stela-cli --target x86_64-pc-windows-msvc
+          mkdir -p stela-windows-x86_64
+          cp target/x86_64-pc-windows-msvc/release/stela.exe stela-windows-x86_64/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stela-windows-x86_64
+          path: stela-windows-x86_64/
+          if-no-files-found: error
