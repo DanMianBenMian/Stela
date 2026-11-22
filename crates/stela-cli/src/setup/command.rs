@@ -188,6 +188,16 @@ struct Wifi {
     /// or DE: this computer's region by default.
     #[arg(long, value_name = "CODE", value_parser = wifi::country, hide = true)]
     wifi_country: Option<String>,
+    /// Ask for the network when the PC starts instead of naming it here:
+    /// stela.efi lists the networks the stick remembers, and a new one is
+    /// typed on that page, so a laptop carried between networks needs no
+    /// other computer.
+    #[arg(
+        long,
+        help = "Choose the Wi-Fi network when the PC starts",
+        verbatim_doc_comment
+    )]
+    wifi_prompt: bool,
 }
 
 impl Wifi {
@@ -199,6 +209,7 @@ impl Wifi {
         }
         request.wifi_passphrase_file = self.wifi_passphrase_file;
         request.wifi_country = self.wifi_country;
+        request.wifi_prompt = self.wifi_prompt;
     }
 }
 
