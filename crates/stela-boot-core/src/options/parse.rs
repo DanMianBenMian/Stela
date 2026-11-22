@@ -195,6 +195,11 @@ impl ParseState<'_> {
                     return Err(Error::DuplicateWifiCountry);
                 }
             }
+            WIFI_PROMPT => {
+                if core::mem::replace(&mut options.wifi_prompt, true) {
+                    return Err(Error::DuplicateWifiPrompt);
+                }
+            }
             USB4_APPROVE => {
                 let uuid = value().and_then(Uuid::parse).ok_or(Error::Usb4Approve)?;
                 if options.usb4_approved.contains(&uuid) {
