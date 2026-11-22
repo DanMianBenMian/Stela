@@ -1,0 +1,26 @@
+name: firmware
+
+# Carries the pinned host-firmware bundle out of a network that cannot
+# reach git.kernel.org or GitLab at a usable speed: this runner fetches each
+# file, checks the pin `crates/stela-loader/src/host_firmware/recipes.rs`
+# holds, and uploads them so `stela create` finds them in its cache.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  seed:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch the pinned host firmware
+        run: python3 .github/firmware-seed.py --out firmware
+      - name: Pack it
+        run: tar -C firmware -cf host-firmware.tar .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-firmware
+          path: host-firmware.tar
+          retention-days: 7
