@@ -412,6 +412,18 @@ pub(super) fn configure(environment: &Environment<'_>, command: &Request) -> Res
         };
         writeln!(text, "  {}", super::wifi::describe(&network))?;
         record.wifi = Some(network);
+        // A named network replaces the page.
+        record.wifi_prompt = false;
+    }
+    if command.wifi_prompt && !record.wifi_prompt {
+        record.wifi_prompt = true;
+        match record.wifi.take() {
+            Some(_) => writeln!(
+                text,
+                "  Wi-Fi          chosen at start; the network it named is no longer joined"
+            )?,
+            None => writeln!(text, "  Wi-Fi          chosen at start")?,
+        }
     }
     if let Some(ipv4) = command.ipv4 {
         record.addresses.ipv4 = Some(super::addresses::Ipv4::new(ipv4, command.ipv4_gateway)?);
