@@ -294,6 +294,13 @@ impl HostNetwork {
         handoff: &crate::handoff::Handoff,
         options: &stela_boot_core::options::System,
     ) -> Result<Self> {
+        // A step that stops without a refusal line leaves the log's last line
+        // as the only evidence, so each call before the first adapter is
+        // named has a line of its own.
+        output::arguments(format_args!(
+            "NETWORK open: {} adapter(s) offered\n",
+            links.devices.len()
+        ));
         let security = security::native(handoff);
         match &security {
             Ok(_) => output::arguments(format_args!(
@@ -304,7 +311,9 @@ impl HostNetwork {
             }
         }
         let mut failures = Vec::new();
+        output::arguments(format_args!("NETWORK open: ordering adapters by carrier\n"));
         links.carrier_first();
+        output::arguments(format_args!("NETWORK open: carriers read\n"));
         // Each adapter is owned by a `RootLink` or still by `links` on every
         // path out, so it is dropped in the loader's root.
         let mut next = 0;
@@ -339,6 +348,9 @@ impl HostNetwork {
                     "adapter {location}: waiting for the link, {seconds} s"
                 ));
             };
+            output::arguments(format_args!(
+                "NETWORK adapter {location}: asking for an address\n"
+            ));
             let result = stack.automatic_waiting(waiting);
             // The DHCP lease, or what the exchange did without one.
             for note in stack.take_notes() {
