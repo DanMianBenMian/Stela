@@ -696,6 +696,19 @@ pub(super) unsafe fn intel_wifi<B: wifi::intel::radio::bios::service::BiosIo>(
             vector: false,
         };
         let interrupt = function.interrupts()?.msix;
+        // The stopped claim sealed bus mastering off, and an Intel radio
+        // comes out of the firmware with its engine running. Decode memory
+        // and quiet interrupts first, stop that engine with a function-level
+        // reset, then release the seal and master the bus for this driver's
+        // own DMA: the order `enable_polled_decode`'s contract describes.
+        function.enable_polled_decode()?;
+        function.function_level_reset(minimum.as_ref())?;
+        // SAFETY: the reset above stopped the firmware's engine without
+        // restart, no other owner of this function exists, and its seal
+        // matched the stopped state until this release.
+        unsafe { function.config().release_bus_master_seal() };
+        // Set memory decoding, bus mastering and INTx-off again: a
+        // function-level reset does not promise to keep COMMAND.
         function.enable_polled()?;
         let vector = match (completion, interrupt) {
             (Some(message), Some(msix)) if msix.table_bar == 0 => {
