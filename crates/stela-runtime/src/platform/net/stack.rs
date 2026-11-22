@@ -39,6 +39,9 @@ pub struct Config {
 /// seconds lost every request there. Other systems' clients ask for a
 /// minute or longer.
 const DHCP_WAIT_US: u64 = 60_000_000;
+/// How long a carrier wait rests between polls: enough for a radio's frame
+/// paths to do work, short enough that a link that comes up is noticed at once.
+const CARRIER_POLL_US: u64 = 10_000;
 /// Seconds between DHCPDISCOVERs while no server answered: RFC 2131 4.1's
 /// first retransmission delay, where smoltcp's default waits 10 s. The
 /// first DISCOVER goes out as the link comes up, when a switch or the
@@ -607,6 +610,19 @@ impl<L: Link, C: Clock> Stack<L, C> {
             if seconds > reported {
                 reported = seconds;
                 waiting(seconds);
+            }
+            // A wired PHY reports carrier by itself, but a radio associates
+            // only while something drives it: its state machine advances
+            // inside the frame paths, never in `carrier()` alone. Poll the
+            // stack between checks and let a little time pass, instead of
+            // spinning on a state that nothing is moving.
+            self.poll()?;
+            // `wait_until` returns at once for a link that signals nothing,
+            // and a radio that has not associated yet signals nothing, so
+            // this waits on the clock itself rather than spin at full speed.
+            let until = self.now()?.saturating_add(CARRIER_POLL_US);
+            while self.now()? < until {
+                core::hint::spin_loop();
             }
         }
         Ok(())
