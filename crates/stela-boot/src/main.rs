@@ -65,6 +65,7 @@ mod system;
 mod tables;
 mod ui;
 mod usb_legacy;
+mod wifi_prompt;
 #[global_allocator]
 pub(crate) static ALLOCATOR: heap::Heap = heap::Heap::new().reporting_failures(|report| {
     use core::fmt::Write;
