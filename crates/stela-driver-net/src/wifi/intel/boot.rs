@@ -72,6 +72,11 @@ const HBUS_TARG_WRPTR: u32 = 0x460;
 use super::interrupts::{self, HW_CAUSES as MSIX_HW_CAUSES};
 const IML_CAUSE: u32 = 1 << 1;
 const RECEIVE_BUFFER_BYTES: usize = 4096;
+/// The BAR0 window [`NativeBootIo`] maps, in bytes: the 16 KiB `from_window`
+/// keeps. The MSI-X cause registers the boot reads and acks sit at 0x2800 and
+/// 0x2808, past the first 8 KiB, so a bound of 8 KiB refused every one of them
+/// and turned the integrated AX210's LTR step into `Access(Bounds)`.
+const WINDOW_BYTES: u32 = 16384;
 
 /// Declared platform integration mode, never inferred from an SB flag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,13 +150,13 @@ impl NativeBootIo {
 }
 impl Csr for NativeBootIo {
     fn read32(&mut self, register: u32) -> Result<u32, power::AccessError> {
-        if !register.is_multiple_of(4) || register > 8188 {
+        if !register.is_multiple_of(4) || register > WINDOW_BYTES - 4 {
             return Err(power::AccessError::Bounds);
         }
         Ok(self.registers.read32(register as usize))
     }
     fn write32(&mut self, register: u32, value: u32) -> Result<(), power::AccessError> {
-        if !register.is_multiple_of(4) || register > 8188 {
+        if !register.is_multiple_of(4) || register > WINDOW_BYTES - 4 {
             return Err(power::AccessError::Bounds);
         }
         self.registers.write32(register as usize, value);
@@ -166,7 +171,7 @@ impl Csr for NativeBootIo {
 // SAFETY: construction requires the owned exclusive requester/BAR.
 unsafe impl BootIo for NativeBootIo {
     fn write8(&mut self, register: u32, value: u8) -> Result<(), power::AccessError> {
-        if register >= 8192 {
+        if register >= WINDOW_BYTES {
             return Err(power::AccessError::Bounds);
         }
         self.registers.write8(register as usize, value);
