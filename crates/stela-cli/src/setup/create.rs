@@ -626,7 +626,15 @@ pub(super) fn plan(
                 serial: command.disk_serial.as_deref(),
                 erase_target: command.erase_target,
                 initialize_nor: command.initialize_nor,
-                usb_disk: usb_disk.as_deref(),
+                // Local fork change: this PC's ESP and the Mac's target
+                // partition are two partitions of the same internal disk,
+                // set up on purpose. Upstream refuses a target on the
+                // stick's disk so a PC disk is never taken for the stick's;
+                // the same explicit opt-in as locate_esp lifts that here.
+                usb_disk: match std::env::var("STELA_ALLOW_INTERNAL_DISK") {
+                    Ok(value) if value == "1" => None,
+                    _ => usb_disk.as_deref(),
+                },
                 external_disks: stick.is_some(),
             },
         )?,
