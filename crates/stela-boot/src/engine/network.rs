@@ -75,17 +75,20 @@ impl Links {
         carriers
     }
 
-    /// The adapters with carrier now first, each group in probe order: a
-    /// cable in the second of two adapters is tried first, not after the
-    /// first adapter's whole wait for a link.
-    fn carrier_first(&mut self) {
+    /// The adapters to try first: the radio a chosen network belongs to when
+    /// `prefer_wireless`, then those with carrier now, each group in probe
+    /// order. A setup whose user picked a Wi-Fi network is not made to wait
+    /// on a cable it may never have, and a cable in the second of two
+    /// adapters still comes before the first one's whole wait for a link.
+    fn carrier_first(&mut self, prefer_wireless: bool) {
         let carriers = self.carriers();
-        let mut paired: Vec<(bool, Adapter)> = carriers
+        let mut paired: Vec<(bool, bool, Adapter)> = carriers
             .into_iter()
             .zip(core::mem::take(&mut self.devices))
+            .map(|(carrier, device)| (carrier, device.wireless(), device))
             .collect();
-        paired.sort_by_key(|(carrier, _)| !carrier);
-        self.devices = paired.into_iter().map(|(_, device)| device).collect();
+        paired.sort_by_key(|(carrier, wireless, _)| (!(prefer_wireless && *wireless), !*carrier));
+        self.devices = paired.into_iter().map(|(_, _, device)| device).collect();
     }
 }
 
@@ -331,7 +334,7 @@ impl HostNetwork {
             output::arguments(format_args!(
                 "NETWORK open: pass {pass} of {AUTOMATIC_PASSES}, ordering adapters by carrier\n"
             ));
-            links.carrier_first();
+            links.carrier_first(options.ssid.is_some());
             let mut next = 0;
             while next < links.devices.len() {
                 let link = RootLink::new(links.devices.remove(next), links.root);
