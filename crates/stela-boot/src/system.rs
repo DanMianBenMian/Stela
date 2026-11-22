@@ -659,7 +659,7 @@ pub(crate) fn boot(
     // NVRAM chooses macOS or recoveryOS before any input is read. A machine
     // NVRAM holds in recovery mode waits at the startup choices, as LLB
     // waits for a restore host, until one that boots is chosen.
-    let options = loop {
+    let mut options = loop {
         crate::status::begin("Reading the startup request in NVRAM");
         let routed = crate::selection::route(options, &mut pending);
         crate::status::done("");
@@ -690,6 +690,10 @@ pub(crate) fn boot(
             }
         }
     };
+    // A `--wifi-prompt` line asks for the network here, while the firmware's
+    // file system and keyboard still run: the choice becomes a `--wifi`
+    // word for the engine and a key file beside `stela.cfg`.
+    crate::wifi_prompt::ask(&mut options, &mut volume);
     // `inputs` closes the volume: protocols must be closed before boot
     // services end.
     let inputs = inputs(&options, volume);
