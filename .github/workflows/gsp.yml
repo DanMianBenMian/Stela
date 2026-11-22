@@ -1,0 +1,66 @@
+name: nvidia-gsp
+
+# download.nvidia.com is slow from this PC and its installer changed, so
+# the pinned GSP-RM image is cut out here on a fast runner and checked
+# against Stela's own SHA-256 pin before it is uploaded.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gsp:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download installer prefix and zstandard
+        run: |
+          pip install zstandard
+          curl -fL --retry 5 --retry-all-errors \
+            -H "Range: bytes=0-52499999" \
+            -o installer.run \
+            https://download.nvidia.com/XFree86/Linux-x86_64/570.211.01/NVIDIA-Linux-x86_64-570.211.01.run
+          test "$(stat -c%s installer.run)" = 52500000
+      - name: Cut out the GSP image
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import zstandard as zstd
+
+          PIN = "3ce89a251900d0238d0593e4b9eb039c4571c6c54d09661fad7399f89e37d4bc"
+          LEN = 64116464
+          OFFSET = 164426
+
+          data = open("installer.run", "rb").read()[OFFSET:]
+          # Decode just enough of the zstd frame to reach the GSP payload.
+          dctx = zstd.ZstdDecompressor()
+          with dctx.stream_reader(data) as reader:
+              out = reader.read(2 * 512 + LEN)
+          # Walk the two tar headers to firmware/gsp_ga10x.bin.
+          pos = 0
+          payload = None
+          for _ in range(8):
+              header = out[pos:pos + 512]
+              pos += 512
+              if not header or all(b == 0 for b in header):
+                  break
+              name = header[:100].split(b"\0", 1)[0].decode(errors="replace")
+              size = int(header[124:136].decode().strip("\0 "), 8)
+              body = out[pos:pos + size]
+              pos += (size + 511) // 512 * 512
+              if name in ("firmware/gsp_ga10x.bin", "./firmware/gsp_ga10x.bin"):
+                  payload = body
+                  break
+          assert payload is not None, "gsp_ga10x.bin not found"
+          assert len(payload) == LEN, (len(payload), LEN)
+          digest = hashlib.sha256(payload).hexdigest()
+          print("GSP sha256:", digest, "expected:", PIN)
+          assert digest == PIN, "GSP image differs from Stela's pin"
+          open("gsp-570.211.01.bin", "wb").write(payload)
+          print("wrote gsp-570.211.01.bin", len(payload), "bytes")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gsp-firmware
+          path: gsp-570.211.01.bin
+          retention-days: 7
