@@ -732,6 +732,7 @@ pub(super) fn plan(
                 .clone()
                 .or_else(environment.wifi_country),
         }),
+        wifi_prompt: command.wifi_prompt,
         usb4_approved: command.usb4_approve.clone(),
         addresses: super::addresses::Addresses::requested(command)?,
     };
@@ -844,6 +845,13 @@ pub(super) fn describe(plan: &Plan) -> Result<String> {
     describe_install(&plan.install, prepared, &mut text)?;
     if let Some(network) = &record.wifi {
         writeln!(text, "  {}", wifi::describe(network))?;
+    }
+    if record.wifi_prompt {
+        writeln!(
+            text,
+            "  Wi-Fi          asked for at start: the USB's own page lists the networks it \
+             remembers"
+        )?;
     }
     for line in record.addresses.describe() {
         writeln!(text, "  {line}")?;
