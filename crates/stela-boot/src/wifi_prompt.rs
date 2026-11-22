@@ -14,7 +14,7 @@
 
 use crate::{
     choice::{self, Press, Wait},
-    console::{font, Framebuffer},
+    console::{Framebuffer, font},
     output,
     ui::{self, Canvas},
 };
@@ -40,6 +40,9 @@ const KEPT: usize = 8;
 const MAX_SSID: usize = 32;
 /// A passphrase is 8 to 63 printable ASCII characters, or 64 hex digits.
 const MAX_PASSPHRASE: usize = 64;
+/// The list rows, shared by drawing and click hit-testing.
+const LIST_ROW: usize = 52;
+const LIST_GAP: usize = 8;
 
 /// Join the network chosen at start, when the options ask for it
 /// (`--wifi-prompt`). `options` gains the `--wifi` word the engine reads,
@@ -137,9 +140,25 @@ fn choose(volume: &mut FileSystem) -> Option<Saved> {
         "WIFI prompt: {} saved network(s)\n",
         picker.saved.len()
     ));
+    let mut pointer = crate::pointer::Cursor::open();
     loop {
-        picker.draw(&mut canvas);
+        pointer.poll();
+        picker.draw(&mut canvas, &pointer);
         canvas.show();
+        // A click on a row is the same act as Enter on the highlighted one.
+        if pointer.clicked {
+            pointer.clicked = false;
+            let (width, height) = canvas.size();
+            let top = ui::HEADER + 16;
+            if let Some(step) = picker.click(&pointer, width, top, height) {
+                match step {
+                    Step::Stay => {}
+                    Step::Leave => return None,
+                    Step::Chosen(chosen) => return Some(chosen),
+                }
+                continue;
+            }
+        }
         let press = match choice::key(None) {
             Wait::Key(press) => press,
             Wait::NoInput => return None,
@@ -250,7 +269,41 @@ impl Picker {
         Step::Stay
     }
 
-    fn draw(&self, canvas: &mut Canvas) {
+    /// The row under the arrow, when the click landed on one.
+    fn click(
+        &mut self,
+        pointer: &crate::pointer::Cursor,
+        width: usize,
+        top: usize,
+        height: usize,
+    ) -> Option<Step> {
+        if self.page != Page::List || !pointer.shown {
+            return None;
+        }
+        let column = width.saturating_sub(32).min(720);
+        let left = (width - column) / 2;
+        let (first_row, fits) = Self::list_layout(top, height);
+        let first = stela_boot_core::screen::window(self.cursor, self.rows(), fits);
+        for (offset, row) in (first..self.rows()).take(fits).enumerate() {
+            let y = first_row + offset * (LIST_ROW + LIST_GAP);
+            if crate::pointer::hits(pointer, left, y, column, LIST_ROW) {
+                self.cursor = row;
+                self.notice = None;
+                return Some(match row {
+                    row if row < self.saved.len() => Step::Chosen(self.saved[row].clone()),
+                    row if row == self.new_row() => {
+                        self.page = Page::Ssid;
+                        self.typed = String::new();
+                        Step::Stay
+                    }
+                    _ => Step::Leave,
+                });
+            }
+        }
+        None
+    }
+
+    fn draw(&self, canvas: &mut Canvas, pointer: &crate::pointer::Cursor) {
         let (width, height) = canvas.size();
         canvas.fill(0, 0, width, height, ui::BACKGROUND);
         let top = canvas.header() + 16;
@@ -270,6 +323,14 @@ impl Picker {
             Page::Passphrase => &[("Enter", "Join"), ("Esc", "Back")],
         };
         footer(canvas, width, height, keys);
+        crate::pointer::draw(canvas, pointer);
+    }
+
+    /// The first row's y and how many rows fit, shared by drawing and clicks.
+    fn list_layout(top: usize, height: usize) -> (usize, usize) {
+        let first_row = top + 36;
+        let fits = (height.saturating_sub(first_row + 96) / (LIST_ROW + LIST_GAP)).max(1);
+        (first_row, fits)
     }
 
     fn draw_list(
@@ -288,20 +349,24 @@ impl Picker {
             1,
             ui::DIM,
         );
-        const ROW: usize = 52;
-        const GAP: usize = 8;
-        let first_row = top + 36;
-        let fits = (height.saturating_sub(first_row + 96) / (ROW + GAP)).max(1);
+        let (first_row, fits) = Self::list_layout(top, height);
         let first = stela_boot_core::screen::window(self.cursor, self.rows(), fits);
         for (offset, row) in (first..self.rows()).take(fits).enumerate() {
-            let y = first_row + offset * (ROW + GAP);
+            let y = first_row + offset * (LIST_ROW + LIST_GAP);
             let chosen = row == self.cursor;
             match chosen {
                 true => {
-                    canvas.panel(left, y, column, ROW, 8, ui::RAISED);
-                    canvas.panel(left + 6, y + 9, 3, ROW.saturating_sub(18), 1, ui::ORANGE);
+                    canvas.panel(left, y, column, LIST_ROW, 8, ui::RAISED);
+                    canvas.panel(
+                        left + 6,
+                        y + 9,
+                        3,
+                        LIST_ROW.saturating_sub(18),
+                        1,
+                        ui::ORANGE,
+                    );
                 }
-                false => canvas.panel(left, y, column, ROW, 8, ui::CARD),
+                false => canvas.panel(left, y, column, LIST_ROW, 8, ui::CARD),
             }
             let (name, detail) = match row {
                 row if row < self.saved.len() => (
@@ -444,9 +509,7 @@ fn typable(character: char) -> bool {
 /// A passphrase Stela joins with: 8 to 63 printable ASCII characters, or a
 /// 64-digit hexadecimal PSK (`setup::wifi::check_passphrase`).
 fn usable_passphrase(passphrase: &str) -> bool {
-    let printable = passphrase
-        .bytes()
-        .all(|byte| (0x20..0x7f).contains(&byte));
+    let printable = passphrase.bytes().all(|byte| (0x20..0x7f).contains(&byte));
     let psk = passphrase.len() == 64 && passphrase.bytes().all(|byte| byte.is_ascii_hexdigit());
     psk || printable && (8..=63).contains(&passphrase.len())
 }
