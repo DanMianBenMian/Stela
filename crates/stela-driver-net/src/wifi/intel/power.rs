@@ -244,6 +244,23 @@ impl<C: Csr> Nic<C> {
         }
         Ok(())
     }
+    /// `iwl_pcie_apm_init`'s hardware workarounds and `iwl_pcie_apm_config`,
+    /// each the `iwl_trans_set_bit` Linux uses: a read-modify-write that never
+    /// looks at what came back. They are workaround bits the silicon may
+    /// decline, and an integrated AX211 declines `CSR_GIO_CHICKEN_BITS`'s
+    /// L1A_NO_L0S_RX every time, so a clear readback is not an error and must
+    /// not be reported as one: the strict check this replaces turned a
+    /// documented no-op into a boot that could not start the radio.
+    fn workarounds(&mut self) -> Result<(), Error> {
+        // Disable L0s without affecting L1; don't wait for ICH L0s.
+        self.set(CHICKEN, 0x00800000)?;
+        // Set FH wait threshold to maximum (HW error during stress W/A).
+        self.set(HPET, 0xffff0000)?;
+        // Enable HAP INTA to wake the device's PCIe link L1a -> L0s.
+        self.set(HW_IF, 0x00080000)?;
+        // L0S states are unstable on these devices: always disable them.
+        self.set(GIO, 2)
+    }
     fn poll(&mut self, register: u32, mask: u32, microseconds: u32) -> Result<(), Error> {
         // Same 10us interval/strict deadline as iwl_poll_bits_mask. A failed
         // register read is never a successful set-bit observation.
@@ -505,11 +522,19 @@ impl<C: Csr> Power<C> {
         if self.profile.platform().integrated && self.profile.family() == Family::Ax200 {
             self.force_power_gating(management)?;
         }
-        self.nic.set_checked(CHICKEN, 0x00800000)?;
-        self.nic.set_checked(HPET, 0xffff0000)?;
-        self.nic.set_checked(HW_IF, 0x00080000)?;
-        self.nic.set_checked(GIO, 2)?;
+        // `iwl_pcie_apm_init`'s order: the workarounds, then the MAC clock.
+        self.nic.workarounds()?;
         self.nic.activate()?;
+        // The reset above is this port's, not Linux's: upstream resets only
+        // when the ownership handshake fails, so it writes the workarounds to
+        // a MAC whose clock the firmware left running. Here the MAC comes out
+        // of SHRD_HW_RST in D0U, where an integrated AX211 (8086:51f0,
+        // `iwl_so_long_latency_mac_cfg`) drops these CSR writes: the writes
+        // that did land above are the host-side ones a poll of its own read
+        // back (`ownership`'s NIC_READY, `activate`'s MAC_CLOCK). Set them
+        // again now that `activate` has proven the clock, so the workarounds
+        // hold in either state instead of being silently lost.
+        self.nic.workarounds()?;
         Ok(Awake {
             family: self.profile.family(),
             rf_killed: self.nic.read(GP)? & 0x08000000 == 0,
