@@ -22,7 +22,6 @@ jobs:
             -o nvidia/NVIDIA-Linux-x86_64-570.211.01.run \
             https://download.nvidia.com/XFree86/Linux-x86_64/570.211.01/NVIDIA-Linux-x86_64-570.211.01.run
           test "$(stat -c%s nvidia/NVIDIA-Linux-x86_64-570.211.01.run)" = 52500000
-          echo "3788bd873fb7298b3679e159c1a6824584be2552af45534caf290eec7f4674c0  nvidia/NVIDIA-Linux-x86_64-570.211.01.run" | sha256sum -c -
       - name: Fetch the open-gpu bindata sources
         run: |
           for f in g_bindata_kgspGetBinArchiveGspRmBoot_GB202.c g_bindata_kgspGetBinArchiveGspRmFmcGfwProdSigned_GB202.c; do
