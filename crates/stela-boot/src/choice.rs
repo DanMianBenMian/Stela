@@ -113,6 +113,9 @@ fn pressed() -> Option<Press> {
         match uefi::system::with_stdin(|input| input.read_key()).ok()?? {
             Key::Printable(character) => match char::from(character) {
                 '\r' | '\n' => Press::Enter,
+                // UEFI reports Backspace as the printable control 0x08;
+                // ScanCode has no BACKSPACE member.
+                '\u{0008}' => Press::Backspace,
                 character => Press::Character(character),
             },
             Key::Special(ScanCode::UP) => Press::Up,
@@ -122,7 +125,6 @@ fn pressed() -> Option<Press> {
             Key::Special(ScanCode::HOME) => Press::Home,
             Key::Special(ScanCode::END) => Press::End,
             Key::Special(ScanCode::DELETE) => Press::Delete,
-            Key::Special(ScanCode::BACKSPACE) => Press::Backspace,
             Key::Special(ScanCode::ESCAPE) => Press::Escape,
             Key::Special(_) => Press::Other,
         },
