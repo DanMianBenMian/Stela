@@ -109,6 +109,11 @@ pub(super) struct Record {
     /// The Wi-Fi network every choice joins (`--wifi`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) wifi: Option<wifi::Network>,
+    /// Every choice asks for the network at start (`--wifi-prompt`): the
+    /// USB's page lists the ones it remembers, so a laptop carried between
+    /// networks needs no other computer to change it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(super) wifi_prompt: bool,
     /// The USB4 devices every choice admits without an IOMMU
     /// (`--usb4-approve`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -233,6 +238,7 @@ impl Record {
         system.profile = self.profile;
         // The key file is `--wifi`'s default one.
         system.ssid = self.wifi.as_ref().map(|network| network.ssid.clone());
+        system.wifi_prompt = self.wifi_prompt;
         system.wifi_country = self
             .wifi
             .as_ref()
