@@ -8,6 +8,7 @@ use anyhow::Result;
 pub(super) fn named(request: &Request) -> bool {
     request.wifi.is_some()
         || request.no_wifi
+        || request.wifi_prompt
         || request.ipv4.is_some()
         || request.automatic_ipv4
         || request.dns.is_some()
