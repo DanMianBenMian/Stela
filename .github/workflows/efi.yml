@@ -14,6 +14,11 @@ name: efi
 # cli.yml compiles stela.exe against an artifact an `efi` run already uploaded.
 on:
   workflow_dispatch:
+    inputs:
+      cli:
+        description: Also build the Windows stela.exe (about six minutes)
+        type: boolean
+        default: false
 
 # windows-2025 runs `run:` under PowerShell by default, and every step here is
 # bash (release.yml makes the same declaration).
@@ -106,6 +111,16 @@ jobs:
       - name: Fetch upstream sources
         run: cargo xtask gpu fetch
 
+      # The loader is a release build with thin LTO and one codegen unit, so
+      # an uncached run spends about twenty minutes compiling crates that did
+      # not change. Cargo's fingerprints still rebuild what did: the cache only
+      # spares the rest.
+      - uses: actions/cache@v4
+        with:
+          path: target/boot
+          key: boot-target-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'crates/stela-boot/Cargo.lock') }}
+          restore-keys: boot-target-
+
       - name: Build stela.efi
         env:
           STELA_RELEASE: "1"
@@ -130,6 +145,9 @@ jobs:
   # does, so the two always match. Only the Windows target is built: this fork
   # exists to set up a Windows PC.
   cli:
+    # The USB setup needs only the loader, so the CLI is built on request:
+    # it spent six minutes of every run building a program this PC never used.
+    if: inputs.cli
     needs: [efi]
     runs-on: windows-2025
     timeout-minutes: 90
